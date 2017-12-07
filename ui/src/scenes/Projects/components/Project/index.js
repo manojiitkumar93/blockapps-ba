@@ -67,7 +67,18 @@ class Project extends Component {
                 key="mood"
               >
                 mood
-              </Button>
+              </Button>,
+
+              <Button
+                icon
+                primary
+                onClick={(e) => this.handleProjectEventClick(e, project.name, 4)}
+                tooltipLabel="Mark as Rejected"
+                key="sentiment_very_dissatisfied"
+              >
+                sentiment_very_dissatisfied
+              </Button> 
+              
             );
         }
       }
