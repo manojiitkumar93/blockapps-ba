@@ -62,6 +62,9 @@ function setContract(admin, contract) {
   contract.settleProject = function* (projectName, supplierAddress, bidAddress) {
     return yield settleProject(admin, contract, projectName, supplierAddress, bidAddress);
   }
+  contract.rejectProject = function* (projectName, buyerAddress, bidAddress) {
+    return yield rejectProject(admin, contract, projectName, buyerAddress, bidAddress);
+  }
   contract.getAcceptedBid = getAcceptedBid;
 
   return contract;
@@ -198,6 +201,22 @@ function* settleProject(admin, contract, projectName, supplierAddress, bidAddres
   const args = {
     name: projectName,
     supplierAddress: supplierAddress,
+    bidAddress: bidAddress,
+  };
+
+  const result = yield rest.callMethod(admin, contract, method, args);
+  const errorCode = parseInt(result[0]);
+  if (errorCode != ErrorCodes.SUCCESS) {
+    throw new Error(errorCode);
+  }
+}
+
+function* rejectProject(admin, contract, projectName, buyerAddress, bidAddress) {
+  rest.verbose('rejectProject', {projectName, buyerAddress, bidAddress});
+  const method = 'rejectProject';
+  const args = {
+    name: projectName,
+    buyerAddress: buyerAddress,
     bidAddress: bidAddress,
   };
 

@@ -52,4 +52,13 @@ contract Bid is ErrorCodes, BidState {
     supplierAddress.send(amountWei-fee);
     return ErrorCodes.SUCCESS;
   }
+
+  function retrieve(address buyerAddress) returns (ErrorCodes) {
+    uint fee = 10000000 wei; // buyer absorbs the fee
+    uint amountWei = amount * 1 ether;
+
+    // transfer will throw
+    buyerAddress.send(amountWei-fee);
+    return ErrorCodes.SUCCESS;
+  }
 }
