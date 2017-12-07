@@ -57,7 +57,7 @@ contract Bid is ErrorCodes, BidState {
     uint fee = 10000000 wei; // buyer absorbs the fee
     uint amountWei = amount * 1 ether;
 
-    // transfer will throw
+    // transfer to buyer
     buyerAddress.send(amountWei-fee);
     return ErrorCodes.SUCCESS;
   }

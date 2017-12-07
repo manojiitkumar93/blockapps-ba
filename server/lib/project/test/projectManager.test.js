@@ -489,6 +489,10 @@ describe('ProjectManager Life Cycle tests', function() {
     const acceptedBid = createdBids[0];
     yield contract.acceptBid(buyer, acceptedBid.id, projectArgs.name);
 
+     // check the Project state after accepting the Bid
+     const projectInProduction = (yield rest.waitQuery(`${projectJs.contractName}?name=eq.${encodeURIComponent(projectArgs.name)}`, 1))[0];
+     assert.equal(parseInt(projectInProduction.state), ProjectState.PRODUCTION, 'Project should be in PRODUCTION state'); 
+
     // get the buyers balance after accepting a bid
     buyer.balance = yield userManagerContract.getBalance(buyer.username);
 
@@ -540,11 +544,15 @@ describe('ProjectManager Life Cycle tests', function() {
       buyerBalance.should.be.bignumber.eq(buyer.initialBalance.minus(delta));
     }
     
-    // reject the project
+    // reject the exixting project
     yield rejectProject(projectArgs.name,buyer.username);
 
     // Check whether bid value is added back to the Buyer account
     delta.should.be.bignumber.eq(buyer.initialBalance.minus(buyerValueBeforeRejecting));
+
+    // check the Project state
+    const projectInRejection = (yield rest.waitQuery(`${projectJs.contractName}?name=eq.${encodeURIComponent(projectArgs.name)}`, 1))[0];
+    assert.equal(parseInt(projectInRejection.state), ProjectState.REJECTED, 'Project should be in REJECTED state');
   
     //supplier balance should be same
     for (let supplier of suppliers) {
@@ -552,6 +560,39 @@ describe('ProjectManager Life Cycle tests', function() {
       if (supplier.username == acceptedBid.supplier) {
         supplier.balance.should.be.bignumber.eq(FAUCET_AWARD);
       }
+    }
+  });
+
+  it('Reject the project which is in OPEN state', function* () {
+    const uid = util.uid();
+    const projectArgs = createProjectArgs(uid);
+    const password = '1234';
+
+    // create buyer
+    const buyerArgs = createUserArgs(projectArgs.buyer, password, UserRole.BUYER);
+    const buyer = yield userManagerContract.createUser(buyerArgs);
+    buyer.password = password; // IRL this will be a prompt to the buyer
+    
+    // create project
+    const project = yield contract.createProject(projectArgs);
+    
+    // Project state should be OPEN after creating the project
+    assert.equal(parseInt(project.state), ProjectState.OPEN, 'Project should be in OPEN state');
+
+    // buyer amount before trying to Reject the project
+    const buyerAmountInOpenState = yield userManagerContract.getBalance(buyer.username);
+     
+    // Try to Reject the project in open state
+    try {
+      errorValue = yield rejectProject(projectArgs.name,buyer.username);
+    } catch(error) {
+      const errorCode = error.message;
+      //Project cannot be Rejected when it is OPEN : Results in NOT_FOUND because there is no accepted bid
+      assert.equal(errorCode, ErrorCodes.NOT_FOUND, 'error should be NOT_FOUND' + JSON.stringify(error));
+
+      // check for the Buyer balance, it should not change
+      const buyerBalance = yield userManagerContract.getBalance(buyer.username);
+      buyerBalance.should.be.bignumber.eq(buyerAmountInOpenState);
     }
   });
 
@@ -588,6 +629,10 @@ describe('ProjectManager Life Cycle tests', function() {
     const acceptedBid = createdBids[0];
     yield contract.acceptBid(buyer, acceptedBid.id, projectArgs.name);
 
+    // check the Project state after accepting the Bid
+    const projectInProduction = (yield rest.waitQuery(`${projectJs.contractName}?name=eq.${encodeURIComponent(projectArgs.name)}`, 1))[0];
+    assert.equal(parseInt(projectInProduction.state), ProjectState.PRODUCTION, 'Project should be in PRODUCTION state');
+
     // get the buyers balance after accepting a bid
     buyer.balance = yield userManagerContract.getBalance(buyer.username);
 
@@ -604,17 +649,132 @@ describe('ProjectManager Life Cycle tests', function() {
         assert.equal(parseInt(bid.state), BidState.REJECTED, 'bid should be REJECTED');
       };
     });
-     
+
+    const buyerAmountAfterAcceptingBid = yield userManagerContract.getBalance(buyer.username);
+    
+    // Try to Reject the Project which is in PRODUCTION state
     try {
       errorValue = yield rejectProject(projectArgs.name,buyer.username);
     } catch(error) {
       const errorCode = error.message;
-      // error should be ERROR
+      // Project cannot be Rejected in PRODUCTION state : Results in ERROR
       assert.equal(errorCode, ErrorCodes.ERROR, 'error should be ERROR' + JSON.stringify(error));
 
-      // check for the Buyer balance, bid value should not be added to his account
+      // check for the Buyer balance, it should not change
       const buyerBalance = yield userManagerContract.getBalance(buyer.username);
-      buyerBalance.should.be.bignumber.eq(buyer.initialBalance.minus(delta));
+      buyerBalance.should.be.bignumber.eq(buyerAmountAfterAcceptingBid);
+    }
+  });
+
+
+  it('Reject the project after it is Accepted', function* () {
+    const uid = util.uid();
+    const projectArgs = createProjectArgs(uid);
+    const password = '1234';
+    const amount = 23;
+    const amountWei = new BigNumber(amount).times(constants.ETHER);
+    const FAUCET_AWARD = new BigNumber(1000).times(constants.ETHER) ;
+    const GAS_LIMIT = new BigNumber(100000000); // default in bockapps-rest
+
+    // create buyer and suppliers
+    const buyerArgs = createUserArgs(projectArgs.buyer, password, UserRole.BUYER);
+    const buyer = yield userManagerContract.createUser(buyerArgs);
+    buyer.password = password; // IRL this will be a prompt to the buyer
+    // create suppliers
+    const suppliers = yield createSuppliers(3, password, uid);
+
+    // create project
+    const project = yield contract.createProject(projectArgs);
+    // create bids
+    const createdBids = yield createMultipleBids(projectArgs.name, suppliers, amount);
+    { // test
+      const bids = yield projectManagerJs.getBidsByName(projectArgs.name);
+      assert.equal(createdBids.length, bids.length, 'should find all the created bids');
+    }
+
+    // get the buyers balance before accepting a bid
+    buyer.initialBalance = yield userManagerContract.getBalance(buyer.username);
+    buyer.initialBalance.should.be.bignumber.eq(FAUCET_AWARD);
+    
+    // accept one bid (the first)
+    const acceptedBid = createdBids[0];
+    yield contract.acceptBid(buyer, acceptedBid.id, projectArgs.name);
+
+    // check the Project state after accepting the Bid
+    const projectInProduction = (yield rest.waitQuery(`${projectJs.contractName}?name=eq.${encodeURIComponent(projectArgs.name)}`, 1))[0];
+    assert.equal(parseInt(projectInProduction.state), ProjectState.PRODUCTION, 'Project should be in PRODUCTION state');
+
+    // get the buyers balance after accepting a bid
+    buyer.balance = yield userManagerContract.getBalance(buyer.username);
+
+    const delta = buyer.initialBalance.minus(buyer.balance);
+    delta.should.be.bignumber.gte(amountWei); // amount + fee
+    delta.should.be.bignumber.lte(amountWei.plus(GAS_LIMIT)); // amount + max fee (gas-limit)
+    // get the bids
+    const bids = yield projectManagerJs.getBidsByName(projectArgs.name);
+    // check that the expected bid is ACCEPTED and all others are REJECTED
+    bids.map(bid => {
+      if (bid.id === acceptedBid.id) {
+        assert.equal(parseInt(bid.state), BidState.ACCEPTED, 'bid should be ACCEPTED');
+      } else {
+        assert.equal(parseInt(bid.state), BidState.REJECTED, 'bid should be REJECTED');
+      };
+    });
+
+     // buyer balance after accepting the bid
+     const buyerBalanceAfterBidIsAccepted = yield userManagerContract.getBalance(buyer.username);
+     
+     // deliver the project
+     const projectState = yield contract.handleEvent(projectArgs.name, ProjectEvent.DELIVER);
+     assert.equal(projectState, ProjectState.INTRANSIT, 'delivered project should be INTRANSIT ');
+
+     // check for the supplier balance after delivering the project, bid amount should not be added
+     for (let supplier of suppliers) {
+      supplier.balance = yield userManagerContract.getBalance(supplier.username);
+      if (supplier.username == acceptedBid.supplier) {
+        supplier.balance.should.be.bignumber.eq(FAUCET_AWARD);
+      }
+    }
+ 
+    // check for the buyer balance in "INTRANSIT" state, it should be same as in "PRODUCTION" state
+    const buyerBalanceInTransitState = yield userManagerContract.getBalance(buyer.username);
+    buyerBalanceAfterBidIsAccepted.should.be.bignumber.eq(buyerBalanceInTransitState);
+         
+    // Accept the project which is in INTRANSIT state
+    yield receiveProject(projectArgs.name);
+
+    // check the balace of suppliers after project is accepted
+    for (let supplier of suppliers) {
+      supplier.balance = yield userManagerContract.getBalance(supplier.username);
+      if (supplier.username == acceptedBid.supplier) {
+        // the winning supplier should have the bid amount minus the tx fee
+        const delta = supplier.balance.minus(FAUCET_AWARD);
+        const fee = new BigNumber(10000000);
+        delta.should.be.bignumber.eq(amountWei.minus(fee));
+      } else {
+        // everyone else should have the otiginal value
+        supplier.balance.should.be.bignumber.eq(FAUCET_AWARD);
+      }
+    }
+
+    // check the project state it should be in RECEIVED state
+    const projectInReceived = (yield rest.waitQuery(`${projectJs.contractName}?name=eq.${encodeURIComponent(projectArgs.name)}`, 1))[0];
+    assert.equal(parseInt(projectInReceived.state), ProjectState.RECEIVED, 'Project should be in RECEIVED state');
+    
+    //Buyer account balance after he Accepts the Project
+    const buyerBalanceAfterAcceptingProject = yield userManagerContract.getBalance(buyer.username);
+
+    // Try to reject the project which is in RECEIVED state
+    try {
+      errorValue = yield rejectProject(projectArgs.name,buyer.username);
+    } catch(error) {
+      const errorCode = error.message;
+      // Project cannot be Rejected in RECEIVED state : Results in ERROR
+      assert.equal(errorCode, ErrorCodes.ERROR, 'error should be ERROR' + JSON.stringify(error));
+
+      // check for the Buyer balance, it should not change
+      const buyerBalance = yield userManagerContract.getBalance(buyer.username);
+      buyerBalance.should.be.bignumber.eq(buyerBalanceAfterAcceptingProject);
     }
   });
 
